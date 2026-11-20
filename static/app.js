@@ -1,3 +1,13 @@
+// If the login session expires, any API call returns 401: send the user back to the sign-in page.
+{
+  const _fetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const r = await _fetch(...args);
+    if (r.status === 401) location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
+    return r;
+  };
+}
+
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const state = {

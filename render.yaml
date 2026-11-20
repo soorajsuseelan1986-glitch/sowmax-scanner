@@ -9,3 +9,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: SECRET_KEY        # signs login cookies; Render generates a random one
+        generateValue: true
+      - key: APP_USERNAME      # set in the Render dashboard, never in this file
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
