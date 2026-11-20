@@ -43,6 +43,18 @@ Free data sources don't provide NSE/BSE option prices. Type your broker's live L
 handled automatically. Check them in `magic.py` (`INDICES`).
 Deep link: `http://127.0.0.1:5000/?mode=magic&index=NIFTY`
 
+## Live data from Groww (recommended)
+With Groww connected, candles, index levels and **option premiums** (with real expiry dates and lot sizes)
+come from Groww. Login is automatic: no daily click.
+
+1. Subscribe to Groww Trade API (paid plan; the free trial has no live or historical data).
+2. On https://groww.in/trade-api/api-keys use the dropdown next to "Generate API key" →
+   **Generate TOTP token**. Copy the **TOTP token** and the **TOTP secret**.
+3. On Render → Environment add `GROWW_API_KEY` (the TOTP token) and `GROWW_TOTP_SECRET` (the secret).
+   The top bar then shows **Groww live**. If it shows "Groww offline", hover it to see the error.
+
+The app uses the first connected feed: Groww, then Zerodha, then Yahoo.
+
 ## Live data from Zerodha (Kite Connect)
 With Kite connected, all candles, index levels and **option premiums** come from Zerodha; otherwise the app uses Yahoo.
 

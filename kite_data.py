@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 
 IST = "Asia/Kolkata"
+NAME = "kite"
 API_KEY = os.environ.get("KITE_API_KEY", "")
 API_SECRET = os.environ.get("KITE_API_SECRET", "")
 
@@ -210,11 +211,19 @@ def download(tickers, period, interval):
 # Options
 # ---------------------------------------------------------------------------
 
-def option_chain(exchange, name, kind, strikes, now):
+UNDERLYING = {"NIFTY": ("NFO", "NIFTY"), "BANKNIFTY": ("NFO", "BANKNIFTY"), "SENSEX": ("BFO", "SENSEX")}
+
+
+def option_candles(handle):
+    return candles(handle, "5minute", 10)
+
+
+def option_chain(key, kind, strikes, now):
     """Nearest-expiry contracts for the given strikes, with live LTPs.
 
-    Returns {"expiry": date, "lot": int, "rows": {strike: {"symbol", "token", "ltp"}}} or None.
+    Returns {"expiry": date, "lot": int, "rows": {strike: {"symbol", "handle", "ltp"}}} or None.
     """
+    exchange, name = UNDERLYING[key]
     opts = [r for r in _inst(exchange) if r["name"] == name and r["instrument_type"] == kind and r["expiry"]]
     if not opts:
         return None
@@ -234,6 +243,6 @@ def option_chain(exchange, name, kind, strikes, now):
     for s, r in chosen.items():
         q = quotes.get(f"{exchange}:{r['tradingsymbol']}")
         if q and q.get("last_price"):
-            rows[s] = {"symbol": r["tradingsymbol"], "token": r["instrument_token"], "ltp": float(q["last_price"])}
+            rows[s] = {"symbol": r["tradingsymbol"], "handle": r["instrument_token"], "ltp": float(q["last_price"])}
     lot = int(next(iter(chosen.values())).get("lot_size") or 0)
     return {"expiry": exp, "lot": lot, "rows": rows} if rows else None

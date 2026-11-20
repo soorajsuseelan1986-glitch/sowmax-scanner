@@ -793,13 +793,23 @@ async function init() {
   bind();
   setAuto();
   load();
-  kiteStatus();
+  feedStatus();
 }
 
-async function kiteStatus() {
+async function feedStatus() {
   const b = $("#kiteBtn");
   try {
-    const k = await (await fetch("/api/kite")).json();
+    const f = await (await fetch("/api/feed")).json();
+    const g = f.groww, k = f.kite;
+    if (g.configured) {  // Groww logs in by itself; the chip just shows its state
+      b.hidden = false;
+      b.removeAttribute("href");
+      b.classList.toggle("on", g.connected);
+      b.classList.toggle("err", !g.connected);
+      b.textContent = g.connected ? "Groww live" : "Groww offline";
+      b.title = g.connected ? "Live data from Groww" : `Groww login failed, using Yahoo. ${g.error || ""}`;
+      return;
+    }
     if (!k.configured) return;
     b.hidden = false;
     b.classList.toggle("on", k.connected);

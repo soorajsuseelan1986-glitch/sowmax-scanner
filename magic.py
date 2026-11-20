@@ -1,6 +1,6 @@
 """Magic Indicator: composite index signal -> auto-selected option strike with Buy / SL / Targets.
 
-When Zerodha Kite is connected, premiums, expiry and lot size are LIVE from Kite, and each strike's
+When Groww or Zerodha is connected, premiums, expiry and lot size are LIVE from the broker, and each strike's
 implied volatility is backed out of its live price. Otherwise premiums are MODELLED with Black-Scholes
 (India VIX as implied volatility). Always check the live premium in your broker before trading.
 """
@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
-import kite_data
+import feeds
 from scanner import IST, _download, _r, adx, atr, ema, macd, rsi, supertrend
 
 RISK_FREE = 0.065
@@ -19,11 +19,11 @@ RISK_FREE = 0.065
 INDICES = {
     # key: yahoo ticker, strike step, lot size, IV multiplier vs India VIX, expiry rule
     "NIFTY": {"name": "NIFTY 50", "ticker": "^NSEI", "step": 50, "lot": 65, "iv_mult": 1.0,
-              "expiry": ("weekly", 1), "exchange": "NSE", "kite": ("NFO", "NIFTY")},
+              "expiry": ("weekly", 1), "exchange": "NSE"},
     "BANKNIFTY": {"name": "BANK NIFTY", "ticker": "^NSEBANK", "step": 100, "lot": 30, "iv_mult": 1.15,
-                  "expiry": ("monthly", 1), "exchange": "NSE", "kite": ("NFO", "BANKNIFTY")},
+                  "expiry": ("monthly", 1), "exchange": "NSE"},
     "SENSEX": {"name": "SENSEX", "ticker": "^BSESN", "step": 100, "lot": 20, "iv_mult": 1.0,
-               "expiry": ("weekly", 3), "exchange": "BSE", "kite": ("BFO", "SENSEX")},
+               "expiry": ("weekly", 3), "exchange": "BSE"},
 }
 VIX = "^INDIAVIX"
 
@@ -65,15 +65,18 @@ def implied_vol(price, S, K, T, kind):
     return (lo + hi) / 2
 
 
-def _live_chain(cfg, spot, kind, now):
-    if not kite_data.connected():
+def _live_chain(key, cfg, spot, kind, now):
+    feed = feeds.active()
+    if not feed:
         return None
     try:
-        exch, name = cfg["kite"]
         atm = round(spot / cfg["step"]) * cfg["step"]
-        return kite_data.option_chain(exch, name, kind, [atm + k * cfg["step"] for k in range(-5, 6)], now)
+        chain = feed.option_chain(key, kind, [atm + k * cfg["step"] for k in range(-5, 6)], now)
+        if chain:
+            chain["feed"] = feed
+        return chain
     except Exception as e:  # fall back to the model
-        print("live option chain failed:", e)
+        print(f"live option chain ({feed.NAME}) failed:", type(e).__name__, e)
         return None
 
 
@@ -257,7 +260,7 @@ def detail(key):
     kind = "CE" if score >= 0 else "PE"  # when WAIT we still show the leaning side
 
     now = pd.Timestamp.now(tz=IST)
-    live = _live_chain(cfg, spot, kind, now)
+    live = _live_chain(key, cfg, spot, kind, now)
     exp = live["expiry"] if live else next_expiry(cfg["expiry"], now)
     lot = (live and live["lot"]) or cfg["lot"]
     T_now = years_to_expiry(exp, now)
@@ -312,7 +315,7 @@ def detail(key):
     odf = None
     if pick_q:
         try:
-            odf = kite_data.candles(pick_q["token"], "5minute", 10)
+            odf = live["feed"].option_candles(pick_q["handle"])
             odf = odf[odf.index.date >= view.index[0].date()] if odf is not None else None
             if odf is not None and len(odf) < 30:  # too little history (e.g. a brand-new weekly) -> model
                 odf = None
@@ -361,7 +364,7 @@ def detail(key):
         "components": comps, "vix": _r(vix), "iv": _r(iv * 100, 1),
         "expiry": exp.isoformat(), "days_to_expiry": (exp - now.date()).days,
         "strike": int(K), "symbol": sym, "lot": lot, "delta": pick["delta"],
-        "source": source, "chart_source": chart_source, "tradingsymbol": pick_q["symbol"] if pick_q else None,
+        "source": source, "chart_source": chart_source, "feed": live["feed"].NAME if live else None, "tradingsymbol": pick_q["symbol"] if pick_q else None,
         "plan": {
             "entry": _r(entry), "sl": _r(sl), "t1": _r(t1), "t2": _r(t2),
             "idx_sl": _r(idx_sl), "idx_t1": _r(idx_t1), "idx_t2": _r(idx_t2),

@@ -85,6 +85,8 @@ button, input, select { font: inherit; color: inherit; }
 .kite-btn.on { background: var(--up-bg); color: var(--up); }
 .kite-btn.on::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .kite-btn[hidden] { display: none; }
+.kite-btn:not([href]) { cursor: default; }
+.kite-btn.err { background: var(--down-bg); color: var(--down); }
 .mkt.open { background: var(--up-bg); color: var(--up); }
 .mkt.open i { box-shadow: 0 0 0 0 currentColor; animation: ping 1.8s infinite; }
 .mkt.pre { background: rgba(245, 165, 36, .14); color: #e6a023; }

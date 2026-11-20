@@ -19,3 +19,7 @@ services:
         sync: false
       - key: KITE_API_SECRET
         sync: false
+      - key: GROWW_API_KEY     # Groww TOTP token (groww.in/trade-api/api-keys)
+        sync: false
+      - key: GROWW_TOTP_SECRET
+        sync: false

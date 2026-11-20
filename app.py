@@ -13,6 +13,8 @@ from flask import Flask, abort, jsonify, redirect, request, send_from_directory,
 
 warnings.filterwarnings("ignore")
 
+import feeds  # noqa: E402
+import groww_data  # noqa: E402
 import kite_data  # noqa: E402
 import magic  # noqa: E402
 import scanner  # noqa: E402
@@ -132,9 +134,10 @@ def kite_disconnect():
     return redirect("/")
 
 
-@app.get("/api/kite")
-def kite_status():
-    return jsonify(kite_data.status())
+@app.get("/api/feed")
+def feed_status():
+    g, k = groww_data.status(), kite_data.status()  # check logins first, then report the active feed
+    return jsonify({"source": feeds.name(), "groww": g, "kite": k})
 
 
 @app.get("/")

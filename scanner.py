@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-import kite_data
+import feeds
 from universe import INDEX_TICKERS, UNIVERSES
 
 IST = "Asia/Kolkata"
@@ -82,20 +82,19 @@ _dl_lock = threading.RLock()  # yfinance downloads are not thread-safe; run them
 
 def _download(tickers, period, interval):
     with _dl_lock:
-        if kite_data.connected():  # Zerodha first; Yahoo if not connected or Kite fails
+        feed = feeds.active()  # Groww / Zerodha when connected; Yahoo otherwise or if they fail
+        if feed:
             try:
-                data = kite_data.download(tickers, period, interval)
+                data = feed.download(tickers, period, interval)
                 if data:
                     return data
-            except kite_data.NotConnected:
-                pass
             except Exception as e:
-                print("kite download failed, using Yahoo:", e)
+                print(f"{feed.NAME} download failed, using Yahoo:", type(e).__name__, e)
         return _download_unlocked(tickers, period, interval)
 
 
 def data_source():
-    return "kite" if kite_data.connected() else "yahoo"
+    return feeds.name()
 
 
 def _download_unlocked(tickers, period, interval):
