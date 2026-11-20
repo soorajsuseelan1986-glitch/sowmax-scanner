@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sowmax-scanner
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Single process: the scan cache and the yfinance download lock live in memory.
+    startCommand: waitress-serve --host=0.0.0.0 --port=$PORT --threads=8 --channel-timeout=180 app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
