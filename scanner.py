@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+import kite_data
 from universe import INDEX_TICKERS, UNIVERSES
 
 IST = "Asia/Kolkata"
@@ -81,7 +82,20 @@ _dl_lock = threading.RLock()  # yfinance downloads are not thread-safe; run them
 
 def _download(tickers, period, interval):
     with _dl_lock:
+        if kite_data.connected():  # Zerodha first; Yahoo if not connected or Kite fails
+            try:
+                data = kite_data.download(tickers, period, interval)
+                if data:
+                    return data
+            except kite_data.NotConnected:
+                pass
+            except Exception as e:
+                print("kite download failed, using Yahoo:", e)
         return _download_unlocked(tickers, period, interval)
+
+
+def data_source():
+    return "kite" if kite_data.connected() else "yahoo"
 
 
 def _download_unlocked(tickers, period, interval):
@@ -395,7 +409,7 @@ def _compute_scan(mode, universe, key):
     payload = {
         "mode": mode, "universe": universe, "universe_name": UNIVERSES[universe]["name"],
         "updated": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "elapsed": round(time.time() - t0, 1),
+        "elapsed": round(time.time() - t0, 1), "source": data_source(),
         "market": {"status": status, "label": label},
         "indices": get_indices(),
         "results": results, "failed": failed,

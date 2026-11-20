@@ -43,6 +43,18 @@ Free data sources don't provide NSE/BSE option prices. Type your broker's live L
 handled automatically. Check them in `magic.py` (`INDICES`).
 Deep link: `http://127.0.0.1:5000/?mode=magic&index=NIFTY`
 
+## Live data from Zerodha (Kite Connect)
+With Kite connected, all candles, index levels and **option premiums** come from Zerodha; otherwise the app uses Yahoo.
+
+1. Subscribe at https://developers.kite.trade and create an app.
+   Redirect URL: `https://sowmax-scanner.onrender.com/kite/callback`
+2. On Render → Environment, add `KITE_API_KEY` and `KITE_API_SECRET`.
+3. In the app, click **Connect Zerodha** (top bar) and log in. Kite tokens expire at 06:00 IST,
+   so do this once each trading day. The button turns green ("Zerodha live") when connected.
+
+Kite allows ~3 history requests/second, so a Nifty 100 scan takes ~35 s on Kite (Nifty 50 ~17 s).
+Kite data is for your personal use only; don't share the site login with others.
+
 ## Customise
 - Stock lists: `universe.py`
 - Rules and thresholds: `scanner.py` (`scan_intraday_one`, `scan_swing_one`)

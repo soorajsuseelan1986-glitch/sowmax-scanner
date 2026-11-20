@@ -15,3 +15,7 @@ services:
         sync: false
       - key: APP_PASSWORD
         sync: false
+      - key: KITE_API_KEY      # from developers.kite.trade
+        sync: false
+      - key: KITE_API_SECRET
+        sync: false

@@ -536,7 +536,7 @@ function renderMagicDetail(d) {
       ${dial(d.score)}
     </div>
     <div class="levels">
-      <div class="lv buy"><div class="k"><span>Buy above</span><span>${mg.ltp[d.symbol] ? "your LTP" : "model premium"}</span></div><div class="v">₹${fmt(sc(p.entry))}</div><div class="s">Index at ${fmt(d.spot)}</div></div>
+      <div class="lv buy"><div class="k"><span>Buy above</span><span>${mg.ltp[d.symbol] ? "your LTP" : d.source === "live" ? "live LTP" : "model premium"}</span></div><div class="v">₹${fmt(sc(p.entry))}</div><div class="s">Index at ${fmt(d.spot)}</div></div>
       <div class="lv sl"><div class="k"><span>Stop-loss</span><span class="pc">${pc(p.sl)}</span></div><div class="v">₹${fmt(sc(p.sl))}</div><div class="s">Index ${fmt(p.idx_sl)}</div></div>
       <div class="lv tg"><div class="k"><span>Target 1</span><span class="pc">${pc(p.t1)}</span></div><div class="v">₹${fmt(sc(p.t1))}</div><div class="s">Index ${fmt(p.idx_t1)}</div></div>
       <div class="lv tg" style="grid-column:1/-1"><div class="k"><span>Target 2 (runner)</span><span class="pc">${pc(p.t2)}</span></div><div class="v">₹${fmt(sc(p.t2))}</div><div class="s">Index ${fmt(p.idx_t2)}</div></div>
@@ -576,8 +576,10 @@ function renderMagicDetail(d) {
       <span>${d.symbol}</span><span class="b">BUY ${fmt(p.entry * r)}</span><span class="s">SL ${fmt(p.sl * r)}</span>
       <span class="t">T1 ${fmt(p.t1 * r)}</span><span class="t">T2 ${fmt(p.t2 * r)}</span><span>Magic ${d.score > 0 ? "+" : ""}${d.score}</span>`;
   }
+  $("#mgLadderNote").textContent = d.source === "live" ? "· live premiums from Zerodha, ★ = auto-selected" : "· model premiums, ★ = auto-selected";
   $("#mgModel").textContent = mg.view === "option"
-    ? `${d.symbol} · 5 min · modelled premium (Black-Scholes, IV ${d.iv}%)`
+    ? (d.chart_source === "live" ? `${d.symbol} · 5 min · live premium (Zerodha) · IV ${d.iv}%`
+                                 : `${d.symbol} · 5 min · modelled premium (Black-Scholes, IV ${d.iv}%)`)
     : `${d.name} · 5 min · NSE/BSE · IST`;
   buildMagicChart(d);
 }
@@ -791,5 +793,30 @@ async function init() {
   bind();
   setAuto();
   load();
+  kiteStatus();
+}
+
+async function kiteStatus() {
+  const b = $("#kiteBtn");
+  try {
+    const k = await (await fetch("/api/kite")).json();
+    if (!k.configured) return;
+    b.hidden = false;
+    b.classList.toggle("on", k.connected);
+    b.textContent = k.connected ? "Zerodha live" : "Connect Zerodha";
+    b.href = k.connected ? "/kite/disconnect" : "/kite/login";
+    b.title = k.connected ? `Live data from Kite${k.user ? ` (${k.user})` : ""}. Click to disconnect.`
+                          : "Not connected: using delayed Yahoo data. Click to log in to Zerodha (needed once a day).";
+    if (k.connected && b.dataset.confirm !== "1") {
+      b.dataset.confirm = "1";
+      b.addEventListener("click", (e) => { if (!confirm("Disconnect Zerodha? Data will fall back to Yahoo.")) e.preventDefault(); });
+    }
+  } catch {}
+  const p = new URLSearchParams(location.search);
+  if (p.has("kite")) {
+    if (p.get("kite") === "failed") alert("Zerodha login didn't complete. Please try again.");
+    p.delete("kite");
+    history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
+  }
 }
 init();

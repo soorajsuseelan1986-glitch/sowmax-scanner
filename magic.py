@@ -1,7 +1,8 @@
 """Magic Indicator: composite index signal -> auto-selected option strike with Buy / SL / Targets.
 
-Option premiums are MODELLED with Black-Scholes (India VIX as implied volatility), because free
-data sources do not provide NSE/BSE option prices. Always check the live premium in your broker.
+When Zerodha Kite is connected, premiums, expiry and lot size are LIVE from Kite, and each strike's
+implied volatility is backed out of its live price. Otherwise premiums are MODELLED with Black-Scholes
+(India VIX as implied volatility). Always check the live premium in your broker before trading.
 """
 import math
 import time
@@ -10,6 +11,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
+import kite_data
 from scanner import IST, _download, _r, adx, atr, ema, macd, rsi, supertrend
 
 RISK_FREE = 0.065
@@ -17,11 +19,11 @@ RISK_FREE = 0.065
 INDICES = {
     # key: yahoo ticker, strike step, lot size, IV multiplier vs India VIX, expiry rule
     "NIFTY": {"name": "NIFTY 50", "ticker": "^NSEI", "step": 50, "lot": 65, "iv_mult": 1.0,
-              "expiry": ("weekly", 1), "exchange": "NSE"},
+              "expiry": ("weekly", 1), "exchange": "NSE", "kite": ("NFO", "NIFTY")},
     "BANKNIFTY": {"name": "BANK NIFTY", "ticker": "^NSEBANK", "step": 100, "lot": 30, "iv_mult": 1.15,
-                  "expiry": ("monthly", 1), "exchange": "NSE"},
+                  "expiry": ("monthly", 1), "exchange": "NSE", "kite": ("NFO", "BANKNIFTY")},
     "SENSEX": {"name": "SENSEX", "ticker": "^BSESN", "step": 100, "lot": 20, "iv_mult": 1.0,
-               "expiry": ("weekly", 3), "exchange": "BSE"},
+               "expiry": ("weekly", 3), "exchange": "BSE", "kite": ("BFO", "SENSEX")},
 }
 VIX = "^INDIAVIX"
 
@@ -47,6 +49,32 @@ def bs(S, K, T, iv, kind):
     if kind == "CE":
         return S * _ncdf(d1) - K * math.exp(-RISK_FREE * T) * _ncdf(d2), _ncdf(d1)
     return K * math.exp(-RISK_FREE * T) * _ncdf(-d2) - S * _ncdf(-d1), _ncdf(d1) - 1
+
+
+def implied_vol(price, S, K, T, kind):
+    """Bisection for the IV that reproduces a live premium; None if the price is below intrinsic."""
+    lo, hi = 0.01, 3.0
+    if not (bs(S, K, T, lo, kind)[0] <= price <= bs(S, K, T, hi, kind)[0]):
+        return None
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if bs(S, K, T, mid, kind)[0] < price:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def _live_chain(cfg, spot, kind, now):
+    if not kite_data.connected():
+        return None
+    try:
+        exch, name = cfg["kite"]
+        atm = round(spot / cfg["step"]) * cfg["step"]
+        return kite_data.option_chain(exch, name, kind, [atm + k * cfg["step"] for k in range(-5, 6)], now)
+    except Exception as e:  # fall back to the model
+        print("live option chain failed:", e)
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -229,23 +257,33 @@ def detail(key):
     kind = "CE" if score >= 0 else "PE"  # when WAIT we still show the leaning side
 
     now = pd.Timestamp.now(tz=IST)
-    exp = next_expiry(cfg["expiry"], now)
+    live = _live_chain(cfg, spot, kind, now)
+    exp = live["expiry"] if live else next_expiry(cfg["expiry"], now)
+    lot = (live and live["lot"]) or cfg["lot"]
     T_now = years_to_expiry(exp, now)
 
     # Strike ladder around ATM; pick the strike whose |delta| is closest to 0.55 (slightly ITM:
     # moves well with the index but costs less theta than deep ITM).
     step = cfg["step"]
     atm = round(spot / step) * step
-    ladder = []
+    ladder, ivs = [], {}
     for k in range(-5, 6):
         K = atm + k * step
-        prem, delta = bs(spot, K, T_now, iv, kind)
-        ladder.append({"strike": K, "premium": _r(prem), "delta": _r(abs(delta)),
+        q = live["rows"].get(float(K)) if live else None
+        k_iv = (q and implied_vol(q["ltp"], spot, K, T_now, kind)) or iv
+        prem, delta = bs(spot, K, T_now, k_iv, kind)
+        if q:
+            prem = q["ltp"]
+        ivs[K] = k_iv
+        ladder.append({"strike": K, "premium": _r(prem), "delta": _r(abs(delta)), "live": bool(q),
+                       "iv": _r(k_iv * 100, 1),
                        "moneyness": "ATM" if K == atm else ("ITM" if (K < spot) == (kind == "CE") else "OTM")})
     pick = min(ladder, key=lambda r: abs(r["delta"] - 0.55))
     K = pick["strike"]
     for r in ladder:
         r["picked"] = r["strike"] == K
+    pick_q = live["rows"].get(float(K)) if live else None
+    iv = ivs[K]  # the picked strike's IV (live-implied when connected) drives SL/targets and the model chart
 
     # Index-level stop & targets from the Magic line (Supertrend), bounded by ATR
     a = float(last["atr"])
@@ -258,7 +296,7 @@ def detail(key):
     idx_t2 = spot + sign * idx_risk * 3
 
     T_exit = years_to_expiry(exp, now + pd.Timedelta(minutes=45))  # assume ~45 min holding for exits
-    entry = bs(spot, K, T_now, iv, kind)[0]
+    entry = pick_q["ltp"] if pick_q else bs(spot, K, T_now, iv, kind)[0]
     sl = bs(idx_sl, K, T_exit, iv, kind)[0]
     t1 = bs(idx_t1, K, T_exit, iv, kind)[0]
     t2 = bs(idx_t2, K, T_exit, iv, kind)[0]
@@ -268,17 +306,31 @@ def detail(key):
     t1 = max(t1, entry + 1.5 * risk)
     t2 = max(t2, entry + 3 * risk)
 
-    # Modelled option candles for the last 2 sessions, then apply the Magic indicator to them
+    # Option candles for the last 2 sessions (live from Kite, else modelled), then the Magic indicator on them
     days = sorted(set(df.index.date))
     view = df[df.index.date >= days[-2]] if len(days) > 1 else df
-    o_rows = []
-    for t, row in view.iterrows():
-        T = years_to_expiry(exp, t)
-        p = lambda s: bs(s, K, T, iv, kind)[0]
-        hi_src, lo_src = (row["High"], row["Low"]) if kind == "CE" else (row["Low"], row["High"])
-        o_rows.append((t, p(row["Open"]), p(hi_src), p(lo_src), p(row["Close"])))
-    odf = pd.DataFrame(o_rows, columns=["t", "Open", "High", "Low", "Close"]).set_index("t")
-    odf["Volume"] = 0
+    odf = None
+    if pick_q:
+        try:
+            odf = kite_data.candles(pick_q["token"], "5minute", 10)
+            odf = odf[odf.index.date >= view.index[0].date()] if odf is not None else None
+            if odf is not None and len(odf) < 30:  # too little history (e.g. a brand-new weekly) -> model
+                odf = None
+        except Exception as e:
+            print("live option candles failed:", e)
+            odf = None
+    source = "live" if pick_q else "model"
+    chart_source = "live" if odf is not None else "model"
+    if odf is None:
+        o_rows = []
+        for t, row in view.iterrows():
+            T = years_to_expiry(exp, t)
+            p = lambda s: bs(s, K, T, iv, kind)[0]
+            hi_src, lo_src = (row["High"], row["Low"]) if kind == "CE" else (row["Low"], row["High"])
+            o_rows.append((t, p(row["Open"]), p(hi_src), p(lo_src), p(row["Close"])))
+        odf = pd.DataFrame(o_rows, columns=["t", "Open", "High", "Low", "Close"]).set_index("t")
+    odf = odf.copy()
+    odf["Volume"] = 0  # keep VWAP out of the option score, as before
     omf, ocomp, oweights = magic_frame(odf, use_vwap=False)
     ots = _ts(omf.index)
     o_last = omf.iloc[-1]
@@ -308,11 +360,12 @@ def detail(key):
         "score": round(score), "signal": signal, "kind": kind, "threshold": THRESHOLD,
         "components": comps, "vix": _r(vix), "iv": _r(iv * 100, 1),
         "expiry": exp.isoformat(), "days_to_expiry": (exp - now.date()).days,
-        "strike": int(K), "symbol": sym, "lot": cfg["lot"], "delta": pick["delta"],
+        "strike": int(K), "symbol": sym, "lot": lot, "delta": pick["delta"],
+        "source": source, "chart_source": chart_source, "tradingsymbol": pick_q["symbol"] if pick_q else None,
         "plan": {
             "entry": _r(entry), "sl": _r(sl), "t1": _r(t1), "t2": _r(t2),
             "idx_sl": _r(idx_sl), "idx_t1": _r(idx_t1), "idx_t2": _r(idx_t2),
-            "risk_lot": _r((entry - sl) * cfg["lot"]), "reward_lot": _r((t1 - entry) * cfg["lot"]),
+            "risk_lot": _r((entry - sl) * lot), "reward_lot": _r((t1 - entry) * lot),
             "trail": _r(o_last["st"]),
         },
         "option": {
