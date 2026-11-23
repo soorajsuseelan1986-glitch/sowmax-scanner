@@ -8,6 +8,7 @@ Redirect URL in the Kite developer console set to  https://<your-site>/kite/call
 """
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import date, datetime, timedelta
 
@@ -133,10 +134,16 @@ def _call(fn_name, *args, **kw):
 
 
 _instruments = {}
+_inst_lock = threading.RLock()
 
 
 def _inst(exchange):
     """Instrument dump for one exchange, cached for the day."""
+    with _inst_lock:
+        return _inst_unlocked(exchange)
+
+
+def _inst_unlocked(exchange):
     key = (exchange, date.today())
     if key not in _instruments:
         for k in [k for k in _instruments if k[-1] != date.today()]:  # drop yesterday's dumps
@@ -147,6 +154,11 @@ def _inst(exchange):
 
 def _token_map(exchange):
     key = ("map", exchange, date.today())
+    with _inst_lock:
+        return _token_map_unlocked(exchange, key)
+
+
+def _token_map_unlocked(exchange, key):
     if key not in _instruments:
         _instruments[key] = {r["tradingsymbol"]: r["instrument_token"] for r in _inst(exchange)
                              if r["segment"] in (exchange, "INDICES")}
@@ -188,22 +200,30 @@ def download(tickers, period, interval):
     """Same contract as scanner._download: {ticker: DataFrame}; missing tickers are left out."""
     kint = INTERVALS[interval]
     days = PERIOD_DAYS.get(period, 365)
-    out = {}
-    for t in tickers:
+
+    def fetch(t):
+        tok = resolve(t)
+        return candles(tok, kint, days) if tok else None
+
+    def one(t):
         try:
-            tok = resolve(t)
-            df = candles(tok, kint, days) if tok else None
+            return t, fetch(t)
         except NotConnected:
             raise
         except Exception as e:  # one bad symbol shouldn't kill the scan
-            print(f"[kite] {t}: {e}")
-            continue
-        if df is None or df.empty:
-            continue
-        if interval == "1wk":
-            df = df.resample("W-MON", label="left", closed="left").agg(
-                {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
-        out[t] = df
+            print(f"[{NAME}] {t}: {e}")
+            return t, None
+
+    out = {}
+    # parallel: the per-second rate limit is enforced in the request helper, so this just hides network latency
+    with ThreadPoolExecutor(max_workers=min(3, max(1, len(tickers)))) as ex:
+        for t, df in ex.map(one, tickers):
+            if df is None or df.empty:
+                continue
+            if interval == "1wk":
+                df = df.resample("W-MON", label="left", closed="left").agg(
+                    {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
+            out[t] = df
     return out
 
 

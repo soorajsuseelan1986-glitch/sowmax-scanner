@@ -373,6 +373,8 @@ def scan_swing_one(sym, df):
 _cache = {}
 _lock = threading.Lock()
 CACHE_TTL = {"intraday": 60, "swing": 900}
+MAX_STALE = {"intraday": 20 * 60, "swing": 6 * 3600}  # older than this -> make the user wait for fresh data
+_refreshing = set()
 CONFIG = {"intraday": ("5d", "5m", scan_intraday_one), "swing": ("2y", "1d", scan_swing_one)}
 
 
@@ -380,8 +382,15 @@ def run_scan(mode, universe="nifty50", force=False):
     key = (mode, universe)
     with _lock:
         hit = _cache.get(key)
-        if hit and not force and time.time() - hit["ts"] < CACHE_TTL[mode]:
-            return hit["data"]
+        if hit and not force:
+            age = time.time() - hit["ts"]
+            if age < CACHE_TTL[mode]:
+                return hit["data"]
+            if age < MAX_STALE[mode]:  # answer instantly with the last result, refresh in the background
+                if key not in _refreshing:
+                    _refreshing.add(key)
+                    threading.Thread(target=_bg_refresh, args=(mode, universe, key), daemon=True).start()
+                return {**hit["data"], "stale": True}
 
     with _dl_lock:  # one scan at a time; a request that waited gets the fresh cached result
         with _lock:
@@ -389,6 +398,17 @@ def run_scan(mode, universe="nifty50", force=False):
             if hit and time.time() - hit["ts"] < 5:
                 return hit["data"]
         return _compute_scan(mode, universe, key)
+
+
+def _bg_refresh(mode, universe, key):
+    try:
+        with _dl_lock:
+            _compute_scan(mode, universe, key)
+    except Exception as e:
+        print(f"background {mode} refresh failed:", e)
+    finally:
+        with _lock:
+            _refreshing.discard(key)
 
 
 def _compute_scan(mode, universe, key):

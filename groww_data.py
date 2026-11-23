@@ -8,6 +8,7 @@ login click. Env vars:
 """
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import date, datetime, timedelta
 
@@ -220,20 +221,27 @@ def download(tickers, period, interval):
     """Same contract as scanner._download: {ticker: DataFrame}; missing tickers are left out."""
     gint = INTERVALS[interval]
     days = PERIOD_DAYS.get(period, 365)
-    out = {}
-    for t in tickers:
+
+    def fetch(t):
         sym = _symbol(t)
-        if not sym:
-            continue
+        return candles(sym, gint, days) if sym else None
+
+    def one(t):
         try:
-            df = candles(sym, gint, days)
+            return t, fetch(t)
         except NotConnected:
             raise
         except Exception as e:  # one bad symbol shouldn't kill the scan
-            print(f"[groww] {t}: {e}")
-            continue
-        if df is not None and len(df):
-            if interval == "1wk":  # make sure candles are weekly, Monday-labelled like Yahoo's
+            print(f"[{NAME}] {t}: {e}")
+            return t, None
+
+    out = {}
+    # parallel: the per-second rate limit is enforced in the request helper, so this just hides network latency
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(tickers)))) as ex:
+        for t, df in ex.map(one, tickers):
+            if df is None or df.empty:
+                continue
+            if interval == "1wk":
                 df = df.resample("W-MON", label="left", closed="left").agg(
                     {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
             out[t] = df

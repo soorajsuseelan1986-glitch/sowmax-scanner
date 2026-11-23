@@ -86,12 +86,18 @@ function tagsCell(x) {
 }
 
 // ---------- data ----------
-async function load(force = false) {
+let staleTimer = null, stalePolls = 0;
+
+async function load(force = false, quiet = false) {
   if (state.mode === "magic") return loadMagic();
+  clearTimeout(staleTimer);
+  if (!quiet) stalePolls = 0;
   const btn = $("#refresh");
-  btn.disabled = true;
-  btn.querySelector("span").textContent = "Scanning…";
-  $("#loading").hidden = false;
+  if (!quiet) {
+    btn.disabled = true;
+    btn.querySelector("span").textContent = "Scanning…";
+    $("#loading").hidden = false;
+  }
   try {
     const r = await fetch(`/api/scan/${state.mode}?universe=${state.universe}${force ? "&force=1" : ""}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -99,14 +105,18 @@ async function load(force = false) {
     if (d.mode !== state.mode || d.universe !== state.universe) return; // changed mid-request
     state.data = d;
     renderAll();
+    // Server answered with the previous result and is refreshing in the background: fetch again shortly.
+    if (d.stale && stalePolls++ < 12) staleTimer = setTimeout(() => load(false, true), 4000);
     const deep = new URLSearchParams(location.search).get("stock");
     if (deep && !state.deepDone) { state.deepDone = true; openDrawer(deep.toUpperCase()); }
   } catch (e) {
-    $("#foot").textContent = `Scan failed: ${e.message}. Check that the server is running.`;
+    if (!quiet) $("#foot").textContent = `Scan failed: ${e.message}. Check that the server is running.`;
   } finally {
-    btn.disabled = false;
-    btn.querySelector("span").textContent = "Scan now";
-    $("#loading").hidden = true;
+    if (!quiet) {
+      btn.disabled = false;
+      btn.querySelector("span").textContent = "Scan now";
+      $("#loading").hidden = true;
+    }
   }
 }
 
@@ -119,7 +129,7 @@ function renderAll() {
   renderTable();
   const t = new Date(d.updated);
   $("#foot").textContent = `${d.universe_name} · ${d.results.length} stocks scanned in ${d.elapsed}s · updated ${t.toLocaleTimeString("en-IN")}` +
-    (d.failed.length ? ` · no data: ${d.failed.join(", ")}` : "");
+    (d.failed.length ? ` · no data: ${d.failed.join(", ")}` : "") + (d.stale ? " · refreshing…" : "");
 }
 
 function spark(pts, prev, up) {

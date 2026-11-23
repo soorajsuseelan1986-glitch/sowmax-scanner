@@ -2,6 +2,7 @@
 import hmac
 import os
 import secrets
+import threading
 import time
 import warnings
 from datetime import timedelta
@@ -186,6 +187,19 @@ def magic_detail(key):
         abort(503)
     return jsonify(data)
 
+
+
+def _warm_up():
+    """Fill the caches right after the server starts, so the first page load doesn't wait for it."""
+    for fn, args in ((run_scan, ("intraday", "nifty50")), (magic.summary, ()), (run_scan, ("swing", "nifty50"))):
+        try:
+            fn(*args)
+        except Exception as e:
+            print("warm-up step failed:", e)
+
+
+if os.environ.get("WARM_UP", "1") == "1":
+    threading.Thread(target=_warm_up, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
