@@ -1,12 +1,12 @@
-"""Picks the live data feed: Groww first, then Zerodha Kite, else None (the app then uses Yahoo).
+"""Picks the live data feed: Groww when connected, else None (the app then uses Yahoo).
 
-Each feed module offers the same functions: connected(), download(tickers, period, interval),
-option_chain(key, kind, strikes, now) and option_candles(handle).
+A feed module offers: configured(), connected(), download(tickers, period, interval),
+option_chain(key, kind, strikes, now) and option_candles(handle). Add another broker by
+writing a module with those functions and listing it in FEEDS.
 """
 import groww_data
-import kite_data
 
-FEEDS = [groww_data, kite_data]
+FEEDS = [groww_data]
 
 
 def active():

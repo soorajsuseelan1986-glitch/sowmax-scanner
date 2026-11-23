@@ -87,6 +87,7 @@ function tagsCell(x) {
 
 // ---------- data ----------
 let staleTimer = null, stalePolls = 0;
+const FEED_TXT = { groww: "Groww" };
 
 async function load(force = false, quiet = false) {
   if (state.mode === "magic") return loadMagic();
@@ -586,9 +587,9 @@ function renderMagicDetail(d) {
       <span>${d.symbol}</span><span class="b">BUY ${fmt(p.entry * r)}</span><span class="s">SL ${fmt(p.sl * r)}</span>
       <span class="t">T1 ${fmt(p.t1 * r)}</span><span class="t">T2 ${fmt(p.t2 * r)}</span><span>Magic ${d.score > 0 ? "+" : ""}${d.score}</span>`;
   }
-  $("#mgLadderNote").textContent = d.source === "live" ? "· live premiums from Zerodha, ★ = auto-selected" : "· model premiums, ★ = auto-selected";
+  $("#mgLadderNote").textContent = d.source === "live" ? `· live premiums from ${FEED_TXT[d.feed] || "broker"}, ★ = auto-selected` : "· model premiums, ★ = auto-selected";
   $("#mgModel").textContent = mg.view === "option"
-    ? (d.chart_source === "live" ? `${d.symbol} · 5 min · live premium (Zerodha) · IV ${d.iv}%`
+    ? (d.chart_source === "live" ? `${d.symbol} · 5 min · live premium (${FEED_TXT[d.feed] || "broker"}) · IV ${d.iv}%`
                                  : `${d.symbol} · 5 min · modelled premium (Black-Scholes, IV ${d.iv}%)`)
     : `${d.name} · 5 min · NSE/BSE · IST`;
   buildMagicChart(d);
@@ -807,36 +808,15 @@ async function init() {
 }
 
 async function feedStatus() {
-  const b = $("#kiteBtn");
+  const b = $("#feedChip");
   try {
-    const f = await (await fetch("/api/feed")).json();
-    const g = f.groww, k = f.kite;
-    if (g.configured) {  // Groww logs in by itself; the chip just shows its state
-      b.hidden = false;
-      b.removeAttribute("href");
-      b.classList.toggle("on", g.connected);
-      b.classList.toggle("err", !g.connected);
-      b.textContent = g.connected ? "Groww live" : "Groww offline";
-      b.title = g.connected ? "Live data from Groww" : `Groww login failed, using Yahoo. ${g.error || ""}`;
-      return;
-    }
-    if (!k.configured) return;
+    const g = (await (await fetch("/api/feed")).json()).groww;
+    if (!g.configured) return;  // no broker set up: plain Yahoo, no chip
     b.hidden = false;
-    b.classList.toggle("on", k.connected);
-    b.textContent = k.connected ? "Zerodha live" : "Connect Zerodha";
-    b.href = k.connected ? "/kite/disconnect" : "/kite/login";
-    b.title = k.connected ? `Live data from Kite${k.user ? ` (${k.user})` : ""}. Click to disconnect.`
-                          : "Not connected: using delayed Yahoo data. Click to log in to Zerodha (needed once a day).";
-    if (k.connected && b.dataset.confirm !== "1") {
-      b.dataset.confirm = "1";
-      b.addEventListener("click", (e) => { if (!confirm("Disconnect Zerodha? Data will fall back to Yahoo.")) e.preventDefault(); });
-    }
+    b.classList.toggle("on", g.connected);
+    b.classList.toggle("err", !g.connected);
+    b.textContent = g.connected ? "Groww live" : "Groww offline";
+    b.title = g.connected ? "Live data from Groww" : `Groww login failed, using Yahoo. ${g.error || ""}`;
   } catch {}
-  const p = new URLSearchParams(location.search);
-  if (p.has("kite")) {
-    if (p.get("kite") === "failed") alert("Zerodha login didn't complete. Please try again.");
-    p.delete("kite");
-    history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
-  }
 }
 init();

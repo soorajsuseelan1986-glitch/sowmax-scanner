@@ -5,7 +5,7 @@ plus a **Magic Indicator** that suggests NIFTY / BANK NIFTY / SENSEX option trad
 
 - **Live site:** https://sowmax-scanner.onrender.com (sign-in required)
 - **Code:** https://github.com/soorajsuseelan1986-glitch/sowmax-scanner
-- **Data:** Groww or Zerodha when connected, otherwise Yahoo Finance (delayed). See [Data sources](#data-sources).
+- **Data:** Groww when connected, otherwise Yahoo Finance (delayed). See [Data sources](#data-sources).
 
 For personal use: education and finding trade ideas, **not investment advice**.
 
@@ -43,8 +43,6 @@ The site runs on Render's free plan and is set up by [`render.yaml`](render.yaml
 | `PYTHON_VERSION` | auto | `3.11.9` (set in `render.yaml`) |
 | `GROWW_API_KEY` | optional | Groww TOTP token |
 | `GROWW_TOTP_SECRET` | optional | Groww TOTP secret |
-| `KITE_API_KEY` | optional | Zerodha Kite Connect API key |
-| `KITE_API_SECRET` | optional | Zerodha Kite Connect API secret |
 
 Never put these values in the code: the GitHub repo is public. After changing them, click **Save, rebuild, and deploy**.
 
@@ -56,31 +54,29 @@ Never put these values in the code: the GitHub repo is public. After changing th
 ---
 
 ## Data sources
-The app uses the first one that works: **Groww → Zerodha → Yahoo**.
-The chip in the top bar shows which one is active. If a broker fails (expired login, outage), the app quietly falls back to Yahoo.
+The app uses **Groww** when it's connected and falls back to **Yahoo Finance** if Groww isn't set up or fails
+(expired login, outage). The chip in the top bar shows the state: **Groww live** or **Groww offline**.
 
-| | Groww Trade API | Zerodha Kite Connect | Yahoo Finance |
-|---|---|---|---|
-| Cost | ₹499/month + GST | ~₹500/month | Free |
-| Daily login | **Automatic** (TOTP) | Click **Connect Zerodha** each day | None |
-| Option premiums | **Live** | **Live** | Modelled (Black-Scholes) |
-| Nifty 50 scan | ~7 s | ~17 s | ~10 s |
-| Notes | History from 2020 | 3 requests/s limit | Delayed; may block cloud servers |
+| | Groww Trade API | Yahoo Finance |
+|---|---|---|
+| Cost | ₹499/month + GST | Free |
+| Daily login | **Automatic** (TOTP) | None |
+| Option premiums | **Live** | Modelled (Black-Scholes) |
+| Nifty 50 scan | ~7 s | ~10 s |
+| Notes | History from 2020 | Delayed; may block cloud servers |
 
-### Groww (recommended)
+### Setting up Groww
 1. Subscribe to the **paid** Groww Trade API. The free trial has no live or historical data.
 2. Go to https://groww.in/trade-api/api-keys. In the dropdown next to "Generate API key", choose
-   **Generate TOTP token**, then copy the **TOTP token** and the **TOTP secret**.
-3. Add them on Render as `GROWW_API_KEY` and `GROWW_TOTP_SECRET`.
-4. The top bar shows **Groww live**. If it says **Groww offline**, hover over it to see the error.
+   **Generate TOTP token** and give it a name.
+3. The screen shows the values **only once**. Use the 📋 copy buttons (the token on screen is cut off):
+   - **TOTP Token** (long, starts with `eyJ…`) → Render `GROWW_API_KEY`
+   - **secret under the QR code** (about 32 letters A–Z and digits 2–7) → Render `GROWW_TOTP_SECRET`
+4. Click **Save, rebuild, and deploy**. The top bar shows **Groww live**.
+   To check from the browser, open `/api/feed` while signed in: it should say `"connected":true`.
 
-### Zerodha (Kite Connect)
-1. At https://developers.kite.trade create a **Connect** app (not Personal, which has no data APIs).
-   - Redirect URL: `https://sowmax-scanner.onrender.com/kite/callback`
-   - Postback URL: leave empty
-2. Add `KITE_API_KEY` and `KITE_API_SECRET` on Render.
-3. Click **Connect Zerodha** in the top bar and log in. Kite logs you out at 06:00 IST, so do this once each trading day.
-   The button turns green (**Zerodha live**) when connected; click it again to disconnect.
+Keep these keys out of chats, screenshots and code. If one leaks, delete it on the Groww API keys page and make a new one.
+Ignore Groww's "static IP" note: that's only for placing orders, and this app only reads data.
 
 ---
 
@@ -112,12 +108,12 @@ Open the **Magic Indicator** tab, then click NIFTY, BANK NIFTY or SENSEX.
    T1 = 1.5R and T2 = 3R. Each index level is converted to a premium with Black-Scholes.
 4. The Magic indicator also runs on the option-premium chart, with a trailing Magic line and BUY/EXIT markers.
 
-**With Groww or Zerodha connected**, everything is live:
+**With Groww connected**, everything is live:
 - the premium, expiry date (including holiday shifts) and lot size come from the broker
 - each strike's implied volatility is worked out from its live price, and that drives SL and targets
 - the option chart uses real candles
 
-Labels show **live LTP** / **live premiums**.
+Labels show **live LTP** / **live premiums from Groww**.
 
 **With Yahoo only**, premiums are *modelled* (Black-Scholes with India VIX as IV), and expiry and lot size
 come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type your broker's LTP into
@@ -133,12 +129,11 @@ come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type y
 ## Project files
 | File | What it does |
 |---|---|
-| `app.py` | Flask server: routes, login, Zerodha connect |
+| `app.py` | Flask server: routes, login, data-feed status, warm-up |
 | `scanner.py` | Indicators, intraday/swing scans, charts, `_download()` (all candle fetching) |
 | `magic.py` | Magic Indicator, strike selection, Black-Scholes, live option pricing |
-| `feeds.py` | Picks the active data feed (Groww → Zerodha → Yahoo) |
+| `feeds.py` | Picks the active data feed (Groww, else Yahoo) |
 | `groww_data.py` | Groww Trade API client |
-| `kite_data.py` | Zerodha Kite Connect client |
 | `universe.py` | Stock lists and index tickers |
 | `static/` | Frontend (`index.html`, `app.js`, `style.css`, `login.html`) |
 | `render.yaml` | Render deployment settings |
@@ -147,13 +142,14 @@ come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type y
 - Stock lists: `universe.py`
 - Rules and thresholds: `scanner.py` (`scan_intraday_one`, `scan_swing_one`)
 - Cache: intraday 60 s, swing 15 min (`CACHE_TTL`). **Scan now** skips the cache.
+  After that, a page refresh shows the last result instantly and updates it in the background
+  (up to 20 min old for intraday and 6 h for swing; `MAX_STALE`).
 
 ## Troubleshooting
 | Problem | Likely cause / fix |
 |---|---|
 | "Login isn't set up yet" | `APP_USERNAME` / `APP_PASSWORD` missing on Render |
-| Scans come back empty | Yahoo is blocking Render's servers. Connect Groww or Zerodha. |
+| Scans come back empty | Yahoo is blocking Render's servers. Connect Groww. |
 | **Groww offline** | Hover over the chip for the error. Check the TOTP token and secret, and that the subscription is active. Groww logins are limited to 150 a day; after a failure the app waits 10 minutes before retrying. |
-| **Connect Zerodha** back after it was green | Kite's daily 06:00 logout. Click it and log in again. |
-| Zerodha login doesn't return to the site | The Kite app's Redirect URL must be exactly `https://sowmax-scanner.onrender.com/kite/callback` |
+| `/api/feed` error "Non-base32 digit found" or "isn't a valid TOTP secret" | The wrong value is in `GROWW_TOTP_SECRET`. It must be the short secret, not the `eyJ…` token. |
 | First page load is very slow | Render free plan waking up (30–60 s) |

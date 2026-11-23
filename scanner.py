@@ -82,7 +82,7 @@ _dl_lock = threading.RLock()  # yfinance downloads are not thread-safe; run them
 
 def _download(tickers, period, interval):
     with _dl_lock:
-        feed = feeds.active()  # Groww / Zerodha when connected; Yahoo otherwise or if they fail
+        feed = feeds.active()  # Groww when connected; Yahoo otherwise or if it fails
         if feed:
             try:
                 data = feed.download(tickers, period, interval)

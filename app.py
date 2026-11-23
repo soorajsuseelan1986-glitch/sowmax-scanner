@@ -16,7 +16,6 @@ warnings.filterwarnings("ignore")
 
 import feeds  # noqa: E402
 import groww_data  # noqa: E402
-import kite_data  # noqa: E402
 import magic  # noqa: E402
 import scanner  # noqa: E402
 from scanner import chart_data, run_scan  # noqa: E402
@@ -86,59 +85,10 @@ def logout():
     return redirect("/login")
 
 
-# ---- Zerodha Kite ------------------------------------------------------------
-# The access token lives in server memory and is also kept in your (signed, HTTPS-only) session
-# cookie, so it survives Render's free plan going to sleep. Kite expires it daily at 06:00 IST.
-
-@app.before_request
-def restore_kite():
-    k = session.get("kite")
-    if k and not kite_data.connected():
-        if not kite_data.restore(k.get("token"), k.get("user"), k.get("since")):
-            if not kite_data.token_fresh(k.get("since")):
-                session.pop("kite", None)
-
-
-def _clear_caches():
-    scanner._cache.clear()
-    scanner._idx_cache["ts"] = 0
-    magic._cache.clear()
-
-
-@app.get("/kite/login")
-def kite_login():
-    if not kite_data.configured():
-        return "Zerodha isn't set up: add KITE_API_KEY and KITE_API_SECRET on the server.", 503
-    return redirect(kite_data.login_url())
-
-
-@app.get("/kite/callback")
-def kite_callback():
-    token = request.args.get("request_token")
-    if request.args.get("status") != "success" or not token:
-        return redirect("/?kite=failed")
-    try:
-        access, user, since = kite_data.connect(token)
-    except Exception as e:
-        print("kite connect failed:", e)
-        return redirect("/?kite=failed")
-    session["kite"] = {"token": access, "user": user, "since": since}
-    _clear_caches()
-    return redirect("/?kite=connected")
-
-
-@app.get("/kite/disconnect")
-def kite_disconnect():
-    session.pop("kite", None)
-    kite_data.disconnect()
-    _clear_caches()
-    return redirect("/")
-
-
 @app.get("/api/feed")
 def feed_status():
-    g, k = groww_data.status(), kite_data.status()  # check logins first, then report the active feed
-    return jsonify({"source": feeds.name(), "groww": g, "kite": k})
+    g = groww_data.status()  # check the login first, then report the active feed
+    return jsonify({"source": feeds.name(), "groww": g})
 
 
 @app.get("/")

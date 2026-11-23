@@ -1,6 +1,6 @@
 """Magic Indicator: composite index signal -> auto-selected option strike with Buy / SL / Targets.
 
-When Groww or Zerodha is connected, premiums, expiry and lot size are LIVE from the broker, and each strike's
+When Groww is connected, premiums, expiry and lot size are LIVE from Groww, and each strike's
 implied volatility is backed out of its live price. Otherwise premiums are MODELLED with Black-Scholes
 (India VIX as implied volatility). Always check the live premium in your broker before trading.
 """
@@ -309,7 +309,7 @@ def detail(key):
     t1 = max(t1, entry + 1.5 * risk)
     t2 = max(t2, entry + 3 * risk)
 
-    # Option candles for the last 2 sessions (live from Kite, else modelled), then the Magic indicator on them
+    # Option candles for the last 2 sessions (live from Groww, else modelled), then the Magic indicator on them
     days = sorted(set(df.index.date))
     view = df[df.index.date >= days[-2]] if len(days) > 1 else df
     odf = None
