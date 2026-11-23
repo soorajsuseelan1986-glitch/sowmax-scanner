@@ -346,8 +346,23 @@ async function drawChart(sym, x) {
     if (!current || current.sym !== sym || prefs.tf[state.mode] !== tf) return; // user moved on
   }
   el.innerHTML = "";
-  buildChart(el, d, x);
+  try {
+    buildChart(el, d, x);
+  } catch (e) {
+    showChartError(e);
+  }
 }
+
+// Surface chart problems on screen (they'd otherwise leave an empty chart with no clue why)
+function showChartError(e) {
+  const el = $("#chart");
+  if (!el || !el.isConnected) return;
+  let box = el.querySelector(".chart-err");
+  if (!box) { box = document.createElement("div"); box.className = "chart-err"; el.appendChild(box); }
+  box.textContent = `Chart error: ${(e && (e.message || e.reason || e)) || "unknown"}`;
+}
+window.addEventListener("error", (ev) => { if ($("#chart") && $("#chart").children.length) showChartError(ev.error || ev.message); });
+window.addEventListener("unhandledrejection", (ev) => { if ($("#chart") && $("#chart").children.length) showChartError(ev.reason); });
 
 function buildChart(el, d, x) {
   const L = LightweightCharts;
@@ -380,6 +395,8 @@ function buildChart(el, d, x) {
       return r;
     },
   });
+  const ok = (v) => typeof v === "number" && isFinite(v);
+  d.candles = d.candles.filter((c) => ok(c.time) && ok(c.open) && ok(c.high) && ok(c.low) && ok(c.close));
   cs.setData(d.candles);
 
   const vs = chart.addSeries(L.HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });

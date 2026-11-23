@@ -111,6 +111,26 @@ def scan(mode):
     return jsonify(run_scan(mode, universe, force=request.args.get("force") == "1"))
 
 
+@app.get("/api/debug/chart/<path:symbol>")
+def chart_debug(symbol):
+    """What the server got for a chart: counts, ordering, gaps, sample rows (no secrets)."""
+    import groww_data
+    symbol, tf = symbol.upper(), request.args.get("tf", "5m")
+    scanner._chart_cache.pop((symbol, tf), None)
+    d = chart_data(symbol, tf)
+    if not d:
+        return jsonify({"symbol": symbol, "tf": tf, "source": feeds.name(), "error": "no data"})
+    cs = d["candles"]
+    times = [c["time"] for c in cs]
+    bad = [c for c in cs if any(not isinstance(c[k], (int, float)) for k in ("open", "high", "low", "close"))]
+    return jsonify({
+        "symbol": symbol, "tf": tf, "source": feeds.name(), "candles": len(cs),
+        "sorted": times == sorted(times), "duplicates": len(times) - len(set(times)), "bad_values": len(bad),
+        "first": cs[:2], "last": cs[-3:], "bad_sample": bad[:3],
+        "groww_raw": groww_data._last_raw.get("NSE-" + symbol),
+    })
+
+
 @app.get("/api/chart/<path:symbol>")
 def chart(symbol):
     tf = request.args.get("tf") or ("5m" if request.args.get("mode") == "intraday" else "1d")

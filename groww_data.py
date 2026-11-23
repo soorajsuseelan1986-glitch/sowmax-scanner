@@ -170,18 +170,38 @@ def _symbol(ticker):
     return None
 
 
-def _frame(rows, daily):
+_last_raw = {}  # symbol -> a few raw candle rows, for /api/debug
+
+
+def _times(t):
+    """Groww timestamps -> IST DatetimeIndex. Handles epoch s/ms and ISO strings with or without offset."""
+    num = pd.to_numeric(t, errors="coerce")
+    if num.notna().all():
+        unit = "ms" if num.max() > 1e11 else "s"
+        return pd.DatetimeIndex(pd.to_datetime(num, unit=unit, utc=True)).tz_convert(IST)
+    idx = pd.DatetimeIndex(pd.to_datetime(t.astype(str), errors="coerce"))
+    return idx.tz_localize(IST) if idx.tz is None else idx.tz_convert(IST)
+
+
+def _frame(rows, daily, symbol=""):
     if not rows:
         return None
-    df = pd.DataFrame([r[:6] for r in rows], columns=["t", "Open", "High", "Low", "Close", "Volume"])
-    t = df["t"]
-    if pd.api.types.is_numeric_dtype(t):  # epoch seconds (UTC)
-        idx = pd.to_datetime(t, unit="s", utc=True).dt.tz_convert(IST)
-    else:  # "2025-09-24T10:30:00", IST wall-clock
-        idx = pd.to_datetime(t).dt.tz_localize(IST)
-    df.index = pd.DatetimeIndex(idx.dt.normalize() if daily else idx)
-    df = df[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric, errors="coerce").fillna({"Volume": 0})
-    df = df.dropna(subset=["Close"])
+    if symbol:
+        _last_raw[symbol] = {"first": rows[:2], "last": rows[-3:], "count": len(rows)}
+    df = pd.DataFrame([list(r[:6]) + [None] * (6 - len(r[:6])) for r in rows],
+                      columns=["t", "Open", "High", "Low", "Close", "Volume"])
+    idx = _times(df["t"])
+    df.index = idx.normalize() if daily else idx
+    df = df[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric, errors="coerce")
+    df = df[df.index.notna()].dropna(subset=["Close"])
+    for c in ("Open", "High", "Low"):  # a missing O/H/L must not leave holes in the candles
+        df[c] = df[c].fillna(df["Close"])
+    df["High"] = df[["Open", "High", "Low", "Close"]].max(axis=1)
+    df["Low"] = df[["Open", "High", "Low", "Close"]].min(axis=1)
+    df["Volume"] = df["Volume"].fillna(0)
+    if not daily:  # keep the regular session only (Groww also sends flat post-close candles)
+        mins = df.index.hour * 60 + df.index.minute
+        df = df[(mins >= 9 * 60 + 15) & (mins < 15 * 60 + 30)]
     return df[~df.index.duplicated(keep="last")].sort_index()
 
 
@@ -198,7 +218,7 @@ def candles(groww_symbol, interval, days, segment="CASH"):
                 "exchange": exch, "segment": segment, "trading_symbol": groww_symbol.split("-", 1)[1],
                 "start_time": start.strftime(fmt), "end_time": end.strftime(fmt),
                 "interval_in_minutes": LEGACY_MINUTES[interval]})
-            df = _frame(p.get("candles") or [], daily)
+            df = _frame(p.get("candles") or [], daily, groww_symbol)
             if df is not None and len(df):
                 return df
         except NotConnected:
@@ -214,7 +234,7 @@ def candles(groww_symbol, interval, days, segment="CASH"):
             "start_time": a.strftime(fmt), "end_time": b.strftime(fmt), "candle_interval": interval})
         rows += p.get("candles") or []
         a = b + timedelta(seconds=1)
-    return _frame(rows, daily)
+    return _frame(rows, daily, groww_symbol)
 
 
 def download(tickers, period, interval):
