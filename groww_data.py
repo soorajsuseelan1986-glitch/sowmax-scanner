@@ -18,9 +18,29 @@ IST = "Asia/Kolkata"
 NAME = "groww"
 API = "https://api.groww.in/v1"
 INSTRUMENT_CSV = "https://growwapi-assets.groww.in/instruments/instrument.csv"
-API_KEY = os.environ.get("GROWW_API_KEY", "")
-TOTP_SECRET = os.environ.get("GROWW_TOTP_SECRET", "")
-API_SECRET = os.environ.get("GROWW_API_SECRET", "")
+def _env(name):
+    """Env value with pasted-in junk removed: spaces, line breaks and surrounding quotes."""
+    return "".join(os.environ.get(name, "").split()).strip("'\"")
+
+
+API_KEY = _env("GROWW_API_KEY")
+TOTP_SECRET = _env("GROWW_TOTP_SECRET").upper().rstrip("=")
+API_SECRET = _env("GROWW_API_SECRET")
+# Common mix-up: the long "eyJ..." token pasted as the secret and the short secret as the key.
+if TOTP_SECRET.upper().startswith("EYJ") and not API_KEY.startswith("eyJ"):
+    API_KEY, TOTP_SECRET = _env("GROWW_TOTP_SECRET"), API_KEY.upper().rstrip("=")
+    print("groww: GROWW_API_KEY and GROWW_TOTP_SECRET look swapped; using them the other way round")
+
+
+def _check_secret():
+    bad = sorted({c for c in TOTP_SECRET if c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"})
+    if bad:
+        return (f"GROWW_TOTP_SECRET isn't a valid TOTP secret: it contains {' '.join(bad[:8])!s} "
+                f"({len(TOTP_SECRET)} characters). A secret has only letters A-Z and digits 2-7, "
+                "about 32 characters. Check you pasted the TOTP *secret*, not the token.")
+    if not API_KEY.startswith("eyJ"):
+        return "GROWW_API_KEY doesn't look like a Groww TOTP token (it should start with eyJ)."
+    return None
 
 INDEX_MAP = {  # Yahoo tickers used in the app -> Groww symbol
     "^NSEI": "NSE-NIFTY", "^NSEBANK": "NSE-BANKNIFTY", "^CNXIT": "NSE-NIFTYIT",
@@ -75,7 +95,10 @@ def _token(force=False):
         try:
             if TOTP_SECRET:
                 import pyotp
-                body = {"key_type": "totp", "totp": pyotp.TOTP(TOTP_SECRET.replace(" ", "")).now()}
+                problem = _check_secret()
+                if problem:
+                    raise GrowwError(problem)
+                body = {"key_type": "totp", "totp": pyotp.TOTP(TOTP_SECRET).now()}
             else:
                 import hashlib
                 ts = int(time.time())

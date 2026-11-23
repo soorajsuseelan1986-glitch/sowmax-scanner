@@ -117,10 +117,13 @@ def _download_unlocked(tickers, period, interval):
 
 def market_status():
     now = pd.Timestamp.now(tz=IST)
+    pre_t = now.replace(hour=9, minute=0, second=0, microsecond=0)
     open_t = now.replace(hour=9, minute=15, second=0, microsecond=0)
     close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
     if now.weekday() >= 5:
         return "closed", "Weekend"
+    if now < pre_t:
+        return "closed", "Market closed"
     if now < open_t:
         return "pre", "Pre-open"
     if now > close_t:
