@@ -30,9 +30,14 @@ For personal use: education and finding trade ideas, **not investment advice**.
 The site runs on Render's free plan and is set up by [`render.yaml`](render.yaml).
 **Every `git push` to `main` redeploys it automatically.**
 
-- Server: `waitress` with one process and 8 threads. Keep it to **one process**: the scan cache and the
-  data-download lock live in memory.
+- Server: `waitress` with one process and 8 threads. Keep it to **one process**: the caches and the
+  Groww rate limiter live in memory.
 - Free plan: the site sleeps after 15 minutes idle, so the first visit afterwards takes 30–60 s.
+  To avoid this, ping `https://sowmax-scanner.onrender.com/login` every 10 min during market hours
+  (free, e.g. cron-job.org, time zone Asia/Kolkata), or upgrade to Render **Starter** ($7/month, never sleeps,
+  more memory).
+- On start-up the server warms its caches (intraday scan, Magic summary, swing scan) in the background.
+  Set `WARM_UP=0` to turn this off.
 
 ### Settings (Render → Environment)
 | Variable | Needed | What it is |
@@ -77,6 +82,18 @@ The app uses **Groww** when it's connected and falls back to **Yahoo Finance** i
 
 Keep these keys out of chats, screenshots and code. If one leaks, delete it on the Groww API keys page and make a new one.
 Ignore Groww's "static IP" note: that's only for placing orders, and this app only reads data.
+
+### How Groww data is handled
+- **Candles:** 5-minute and other intraday candles come from Groww's `/historical/candles`, which includes today's
+  candles during market hours. Timestamps are Indian time (IST). Daily and weekly data come from Groww's older
+  `/historical/candle/range` endpoint (years in one request); if that fails, the app falls back to the chunked one.
+- **Cleaning:** Groww also sends **pre-open (09:00–09:15)** candles, often with an empty *open*, and flat
+  **post-close** candles after 15:30. The app keeps only the regular 09:15–15:30 session and fills any missing
+  open/high/low from the close, so charts and the opening-range checks aren't distorted.
+- **Speed:** up to 8 requests at once, about 8 per second (under Groww's limits). A Nifty 50 scan takes about 7 s.
+- **Login:** a fresh access token is made automatically each day after 06:00 IST, and again whenever Groww rejects one.
+- **Options:** contract list (expiries, strikes, lot sizes) from Groww's public instrument file, downloaded once a day;
+  live premiums from Groww's option chain.
 
 ---
 
@@ -123,6 +140,9 @@ come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type y
 
 ## Links
 - Swing mode, one stock: `/?mode=swing&stock=RELIANCE`
+- Data-feed status: `/api/feed` (`"source":"groww"` and `"connected":true` = live)
+- Chart diagnostics: `/api/debug/chart/TITAN?tf=5m`. Shows candle count, order, duplicates, empty values and raw
+  Groww sample rows (no keys). Use it when a chart looks wrong.
 - Magic Indicator: `/?mode=magic&index=NIFTY`
 - Magic chart full-screen in its own tab: `/?mode=magic&index=NIFTY&full=1`
 
@@ -141,9 +161,11 @@ come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type y
 ## Customise
 - Stock lists: `universe.py`
 - Rules and thresholds: `scanner.py` (`scan_intraday_one`, `scan_swing_one`)
-- Cache: intraday 60 s, swing 15 min (`CACHE_TTL`). **Scan now** skips the cache.
-  After that, a page refresh shows the last result instantly and updates it in the background
-  (up to 20 min old for intraday and 6 h for swing; `MAX_STALE`).
+- Scan cache: intraday 60 s, swing 15 min (`CACHE_TTL` in `scanner.py`). **Scan now** skips the cache.
+  After that, a page refresh shows the last result instantly and updates it in the background; the footer
+  says "refreshing…" until the new result appears (up to 20 min old for intraday and 6 h for swing; `MAX_STALE`).
+- Chart cache: 30 s for intraday timeframes, 5 min for 1D/1W (`chart_data` in `scanner.py`).
+  Charts never wait for a running scan.
 
 ## Troubleshooting
 | Problem | Likely cause / fix |
@@ -152,4 +174,6 @@ come from fixed rules in `magic.py` (`INDICES`). Holidays aren't handled. Type y
 | Scans come back empty | Yahoo is blocking Render's servers. Connect Groww. |
 | **Groww offline** | Hover over the chip for the error. Check the TOTP token and secret, and that the subscription is active. Groww logins are limited to 150 a day; after a failure the app waits 10 minutes before retrying. |
 | `/api/feed` error "Non-base32 digit found" or "isn't a valid TOTP secret" | The wrong value is in `GROWW_TOTP_SECRET`. It must be the short secret, not the `eyJ…` token. |
-| First page load is very slow | Render free plan waking up (30–60 s) |
+| First page load is very slow | Render free plan waking up (30–60 s). See the ping / Starter tip under Deploy. |
+| Chart is empty, or shows a red "Chart error" | Hard-refresh (Cmd + Shift + R). If it persists, open `/api/debug/chart/<SYMBOL>?tf=5m`: `bad_values` should be 0 and `sorted` true. |
+| A stock is listed under "no data" | Its symbol in `universe.py` may be outdated (e.g. after a rename). `ICICIPRULI` isn't in Groww's list. |
