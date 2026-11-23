@@ -77,19 +77,20 @@ def supertrend(df, n=10, mult=3.0):
 # Data
 # --------------------------------------------------------------------------
 
-_dl_lock = threading.RLock()  # yfinance downloads are not thread-safe; run them one at a time
+_yf_lock = threading.RLock()  # yfinance downloads are not thread-safe; run them one at a time
+_scan_lock = threading.RLock()  # one scan computation at a time (charts don't wait for this)
 
 
 def _download(tickers, period, interval):
-    with _dl_lock:
-        feed = feeds.active()  # Groww when connected; Yahoo otherwise or if it fails
-        if feed:
-            try:
-                data = feed.download(tickers, period, interval)
-                if data:
-                    return data
-            except Exception as e:
-                print(f"{feed.NAME} download failed, using Yahoo:", type(e).__name__, e)
+    feed = feeds.active()  # Groww when connected (thread-safe, rate-limited); Yahoo otherwise or if it fails
+    if feed:
+        try:
+            data = feed.download(tickers, period, interval)
+            if data:
+                return data
+        except Exception as e:
+            print(f"{feed.NAME} download failed, using Yahoo:", type(e).__name__, e)
+    with _yf_lock:
         return _download_unlocked(tickers, period, interval)
 
 
@@ -392,7 +393,7 @@ def run_scan(mode, universe="nifty50", force=False):
                     threading.Thread(target=_bg_refresh, args=(mode, universe, key), daemon=True).start()
                 return {**hit["data"], "stale": True}
 
-    with _dl_lock:  # one scan at a time; a request that waited gets the fresh cached result
+    with _scan_lock:  # one scan at a time; a request that waited gets the fresh cached result
         with _lock:
             hit = _cache.get(key)
             if hit and time.time() - hit["ts"] < 5:
@@ -402,7 +403,7 @@ def run_scan(mode, universe="nifty50", force=False):
 
 def _bg_refresh(mode, universe, key):
     try:
-        with _dl_lock:
+        with _scan_lock:
             _compute_scan(mode, universe, key)
     except Exception as e:
         print(f"background {mode} refresh failed:", e)
@@ -489,9 +490,29 @@ def _series(ts, s, d=2, gaps=False):
     return [{"time": t, "value": _r(v, d)} for t, v in zip(ts, s.values) if _r(v, d) is not None]
 
 
+_chart_cache = {}
+_chart_lock = threading.Lock()
+
+
 def chart_data(symbol, tf="1d"):
+    """Chart payload, cached briefly (30 s intraday, 5 min daily/weekly) so reopening a chart is instant."""
     if tf not in TIMEFRAMES:
         tf = "1d"
+    key, ttl = (symbol, tf), (30 if TIMEFRAMES[tf][3] else 300)
+    with _chart_lock:
+        hit = _chart_cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+    data = _chart_data(symbol, tf)
+    if data:
+        with _chart_lock:
+            if len(_chart_cache) > 300:  # keep memory bounded
+                _chart_cache.clear()
+            _chart_cache[key] = (time.time(), data)
+    return data
+
+
+def _chart_data(symbol, tf):
     interval, period, label, intraday = TIMEFRAMES[tf]
     t = symbol + ".NS"
     df = _download([t], period, interval).get(t)

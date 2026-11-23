@@ -52,7 +52,7 @@ INTERVALS = {"1m": "1minute", "5m": "5minute", "15m": "15minute", "30m": "30minu
              "60m": "1hour", "1d": "1day", "1wk": "1week"}
 MAX_DAYS = {"1minute": 30, "5minute": 30, "15minute": 90, "30minute": 90, "1hour": 180, "1day": 180, "1week": 180}
 LEGACY_MINUTES = {"1day": 1440, "1week": 10080}  # older endpoint: whole range in one request
-PERIOD_DAYS = {"5d": 10, "1mo": 31, "60d": 60, "1y": 365, "2y": 730, "5y": 1825, "10y": 3650}
+PERIOD_DAYS = {"5d": 10, "1mo": 29, "60d": 60, "1y": 365, "2y": 730, "5y": 1825, "10y": 3650}
 EARLIEST = datetime(2020, 1, 1)  # Groww history starts in 2020
 
 
